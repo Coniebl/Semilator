@@ -1,7 +1,8 @@
 import QRCode from 'react-native-qrcode-svg';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions, Alert } from 'react-native';
 import { router } from 'expo-router';
+import { supabase } from '@/lib/supabase';
 
 export default function PairingScreen() {
   const { width, height } = useWindowDimensions();
@@ -11,18 +12,59 @@ export default function PairingScreen() {
   const scale = Math.min(width / 800, height / 480, 1);
 
   useEffect(() => {
-    // Generate random 6 digit code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setPairingCode(code);
+    let channel: any;
+
+    const initPairing = async () => {
+      // Generate random 6 digit code
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      setPairingCode(code);
+
+      // Insert session to DB
+      const { error } = await supabase.from('pairing_sessions').insert({ code, status: 'pending' });
+      if (error) {
+        console.error("Failed to create pairing session:", error);
+      }
+
+      // Listen for pairing event
+      channel = supabase
+        .channel(`pairing_${code}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pairing_sessions', filter: `code=eq.${code}` }, async (payload) => {
+          if (payload.new.status === 'paired' && payload.new.paired_user_id) {
+            // Fetch user profile
+            const { data, error } = await supabase.from('profiles').select('*').eq('id', payload.new.paired_user_id).single();
+            if (data) {
+              router.replace(`/dashboard?role=${data.role}&username=${data.username}&userId=${data.id}`);
+            } else {
+              console.error("Failed to fetch user profile", error);
+            }
+          }
+        })
+        .subscribe();
+    };
+
+    initPairing();
+
+    return () => {
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
   }, []);
 
-  const handleSimulateConnection = () => {
-    // Randomly pick buyer or seller and a username
-    const roles = ['buyer', 'seller'];
-    const names = ['John', 'Alice', 'Mike', 'Sarah'];
-    const randomRole = roles[Math.floor(Math.random() * roles.length)];
-    const randomName = names[Math.floor(Math.random() * names.length)];
-    router.replace(`/dashboard?role=${randomRole}&username=${randomName}`);
+  const simulateScan = async (role: 'buyer' | 'seller') => {
+    const userId = role === 'buyer' 
+      ? '11111111-1111-1111-1111-111111111111' 
+      : '22222222-2222-2222-2222-222222222222';
+    
+    const { error } = await supabase
+      .from('pairing_sessions')
+      .update({ status: 'paired', paired_user_id: userId })
+      .eq('code', pairingCode);
+      
+    if (error) {
+      console.error("Simulation failed:", error);
+      Alert.alert("Error", "Could not simulate connection.");
+    }
   };
 
   return (
@@ -47,12 +89,20 @@ export default function PairingScreen() {
           <Text style={styles.codeText}>{pairingCode}</Text>
         </View>
 
-        <Pressable 
-          style={({ pressed }) => [styles.simulateBtn, pressed && { opacity: 0.7 }]} 
-          onPress={handleSimulateConnection}
-        >
-          <Text style={styles.simulateBtnText}>Simulate Connection</Text>
-        </Pressable>
+        <View style={styles.simulateButtonsRow}>
+          <Pressable 
+            style={({ pressed }) => [styles.simulateBtn, pressed && { opacity: 0.7 }]} 
+            onPress={() => simulateScan('buyer')}
+          >
+            <Text style={styles.simulateBtnText}>Simulate Buyer</Text>
+          </Pressable>
+          <Pressable 
+            style={({ pressed }) => [styles.simulateBtn, styles.simulateBtnSeller, pressed && { opacity: 0.7 }]} 
+            onPress={() => simulateScan('seller')}
+          >
+            <Text style={styles.simulateBtnText}>Simulate Seller</Text>
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -107,12 +157,19 @@ const styles = StyleSheet.create({
     color: '#000000',
     letterSpacing: 2,
   },
-  simulateBtn: {
+  simulateButtonsRow: {
+    flexDirection: 'row',
+    gap: 16,
     marginTop: 10,
+  },
+  simulateBtn: {
     backgroundColor: '#3b7597',
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 8,
+  },
+  simulateBtnSeller: {
+    backgroundColor: '#0EA40E',
   },
   simulateBtnText: {
     color: 'white',

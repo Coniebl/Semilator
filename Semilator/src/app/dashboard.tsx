@@ -2,9 +2,10 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, Pressable, ScrollView, TextInput } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
+import { supabase } from '@/lib/supabase';
 
 // --- Subcomponents for Buyer ---
-const BuyerDashboard = () => {
+const BuyerDashboard = ({ userId }: { userId: string }) => {
   const [expectedStr, setExpectedStr] = useState('0');
   const expected = parseInt(expectedStr) || 0;
   const [counted, setCounted] = useState(0);
@@ -15,21 +16,47 @@ const BuyerDashboard = () => {
   const [history, setHistory] = useState<any[]>([]);
 
   useEffect(() => {
+    if (userId) {
+      supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .then(({ data }) => {
+          if (data) {
+            const mapped = data.map(item => {
+              const d = new Date(item.created_at);
+              const mm = String(d.getMonth() + 1).padStart(2, '0');
+              const dd = String(d.getDate()).padStart(2, '0');
+              const yyyy = d.getFullYear();
+              const HH = String(d.getHours()).padStart(2, '0');
+              const min = String(d.getMinutes()).padStart(2, '0');
+              const diff = item.count - (item.expected || 0);
+              let color = '#1eb81e';
+              if (diff !== 0) color = '#d31f1f';
+              
+              return {
+                id: item.id,
+                count: item.count,
+                expected: item.expected,
+                status: item.status,
+                date: `${mm}/${dd}/${yyyy} • ${HH}:${min}`,
+                color
+              };
+            });
+            setHistory(mapped);
+          }
+        });
+    }
+  }, [userId]);
+
+  useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isRunning) {
       interval = setInterval(() => {
         setCounted(prev => {
           if (prev >= targetCount - 1) {
             setIsRunning(false);
-            
-            // Record to history
-            const now = new Date();
-            const mm = String(now.getMonth() + 1).padStart(2, '0');
-            const dd = String(now.getDate()).padStart(2, '0');
-            const yyyy = now.getFullYear();
-            const HH = String(now.getHours()).padStart(2, '0');
-            const min = String(now.getMinutes()).padStart(2, '0');
-            const dateStr = `${mm}/${dd}/${yyyy} • ${HH}:${min}`;
             
             const diff = targetCount - expected;
             let statusStr = 'correct';
@@ -42,29 +69,48 @@ const BuyerDashboard = () => {
                statusColor = '#d31f1f';
             }
             
-            setHistory(h => [{
-              id: h.length > 0 ? h[0].id + 1 : 1,
+            // Save to DB
+            supabase.from('transactions').insert({
+              user_id: userId,
               count: targetCount,
               expected: expected,
-              status: statusStr,
-              date: dateStr,
-              color: statusColor
-            }, ...h]);
+              status: statusStr
+            }).select().single().then(({ data }) => {
+              if (data) {
+                const now = new Date(data.created_at);
+                const mm = String(now.getMonth() + 1).padStart(2, '0');
+                const dd = String(now.getDate()).padStart(2, '0');
+                const yyyy = now.getFullYear();
+                const HH = String(now.getHours()).padStart(2, '0');
+                const min = String(now.getMinutes()).padStart(2, '0');
+                const dateStr = `${mm}/${dd}/${yyyy} • ${HH}:${min}`;
+                
+                setHistory(h => [{
+                  id: data.id,
+                  count: data.count,
+                  expected: data.expected,
+                  status: data.status,
+                  date: dateStr,
+                  color: statusColor
+                }, ...h]);
+              }
+            });
 
             return targetCount;
           }
           return prev + 1;
         });
-      }, 50); // fast simulation
+      }, 300); // slowed down simulation
     }
     return () => clearInterval(interval);
-  }, [isRunning, expected, targetCount]);
+  }, [isRunning, expected, targetCount, userId]);
 
-  const handleDeleteHistory = (id: number) => {
+  const handleDeleteHistory = async (id: string) => {
+    await supabase.from('transactions').delete().eq('id', id);
     setHistory(prev => prev.filter(item => item.id !== id));
   };
 
-  const renderLeftActions = (id: number) => {
+  const renderLeftActions = (id: string) => {
     return (
       <View style={styles.deleteAction}>
         <Pressable style={styles.deleteBtn} onPress={() => handleDeleteHistory(id)}>
@@ -142,10 +188,10 @@ const BuyerDashboard = () => {
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>VERIFICATION HISTORY</Text>
         <ScrollView style={styles.historyList}>
-          {history.map(item => (
+          {history.map((item, index) => (
             <Swipeable key={item.id} renderLeftActions={() => renderLeftActions(item.id)}>
               <View style={styles.historyCardWrapper}>
-                <View style={styles.historyBadge}><Text style={styles.historyBadgeText}>{item.id}</Text></View>
+                <View style={styles.historyBadge}><Text style={styles.historyBadgeText}>{history.length - index}</Text></View>
                 <View style={styles.historyCard}>
                   <View style={styles.historyCardColumns}>
                     <View style={styles.historyCol}>
@@ -174,19 +220,127 @@ const BuyerDashboard = () => {
 };
 
 // --- Subcomponents for Seller ---
-const SellerDashboard = () => {
-  const [target, setTarget] = useState(100);
-  const [counted, setCounted] = useState(47);
-  const pricePerPiece = 2.50;
+const SellerDashboard = ({ userId }: { userId: string }) => {
+  const [targetStr, setTargetStr] = useState('100');
+  const target = parseInt(targetStr) || 0;
+  
+  const [priceStr, setPriceStr] = useState('2.50');
+  const pricePerPiece = parseFloat(priceStr) || 0;
+  
+  const [counted, setCounted] = useState(0);
+  const [targetCount, setTargetCount] = useState(0);
+  const [isRunning, setIsRunning] = useState(false);
+  
   const total = counted * pricePerPiece;
+  const [history, setHistory] = useState<any[]>([]);
 
-  const handleClear = () => {
-    setCounted(0);
+  useEffect(() => {
+    if (userId) {
+      supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .then(({ data }) => {
+          if (data) {
+            const mapped = data.map(item => {
+              const d = new Date(item.created_at);
+              const mm = String(d.getMonth() + 1).padStart(2, '0');
+              const dd = String(d.getDate()).padStart(2, '0');
+              const yyyy = d.getFullYear();
+              const HH = String(d.getHours()).padStart(2, '0');
+              const min = String(d.getMinutes()).padStart(2, '0');
+              return {
+                id: item.id,
+                count: item.count,
+                amount: item.amount,
+                date: `${mm}/${dd}/${yyyy} • ${HH}:${min}`
+              };
+            });
+            setHistory(mapped);
+          }
+        });
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isRunning) {
+      interval = setInterval(() => {
+        setCounted(prev => {
+          if (prev >= targetCount - 1) {
+            setIsRunning(false);
+            const finalCount = targetCount;
+            const finalTotal = finalCount * pricePerPiece;
+
+            // Save to DB
+            supabase.from('transactions').insert({
+              user_id: userId,
+              count: finalCount,
+              amount: finalTotal
+            }).select().single().then(({ data }) => {
+              if (data) {
+                const now = new Date(data.created_at);
+                const mm = String(now.getMonth() + 1).padStart(2, '0');
+                const dd = String(now.getDate()).padStart(2, '0');
+                const yyyy = now.getFullYear();
+                const HH = String(now.getHours()).padStart(2, '0');
+                const min = String(now.getMinutes()).padStart(2, '0');
+                const dateStr = `${mm}/${dd}/${yyyy} • ${HH}:${min}`;
+                
+                setHistory(h => [{
+                  id: data.id,
+                  count: data.count,
+                  amount: data.amount,
+                  date: dateStr
+                }, ...h]);
+              }
+            });
+
+            return targetCount;
+          }
+          return prev + 1;
+        });
+      }, 300);
+    }
+    return () => clearInterval(interval);
+  }, [isRunning, targetCount, userId, pricePerPiece]);
+
+  const handleDeleteHistory = async (id: string) => {
+    await supabase.from('transactions').delete().eq('id', id);
+    setHistory(prev => prev.filter(item => item.id !== id));
   };
 
-  const handleNewTransaction = () => {
-    setCounted(0);
-    setTarget(100);
+  const renderLeftActions = (id: string) => {
+    return (
+      <View style={styles.deleteAction}>
+        <Pressable style={styles.deleteBtn} onPress={() => handleDeleteHistory(id)}>
+          <Text style={styles.deleteBtnText}>Delete</Text>
+        </Pressable>
+      </View>
+    );
+  };
+
+  const handleStart = () => {
+    if (!isRunning && target > 0) {
+      if (counted > 0) setCounted(0);
+      
+      const rand = Math.random();
+      let newTarget = target;
+      if (rand < 0.25) {
+        newTarget = Math.max(0, target - Math.floor(Math.random() * 5 + 1));
+      } else if (rand > 0.75) {
+        newTarget = target + Math.floor(Math.random() * 5 + 1);
+      }
+      
+      setTargetCount(newTarget);
+      
+      if (newTarget === 0) {
+        setCounted(0);
+      } else {
+        setIsRunning(true);
+      }
+    }
   };
 
   return (
@@ -196,63 +350,80 @@ const SellerDashboard = () => {
         <Text style={styles.panelTitle}>LIVE COUNT</Text>
         <View style={styles.largeCard}>
           <Text style={styles.largeCardNumber}>{String(counted).padStart(5, '0')}</Text>
-          <Text style={styles.largeCardLabel}>Fingerlings</Text>
+          <Text style={styles.largeCardLabel}>Fingerlings Counted</Text>
         </View>
         
         <View style={styles.statsContainer}>
           <View style={styles.divider} />
           <View style={styles.statsRow}>
             <Text style={styles.statLabel}>Target:</Text>
-            <Text style={styles.statValue}>{String(target).padStart(5, '0')}</Text>
+            <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end'}}>
+              <TextInput 
+                style={[styles.statValue, styles.input, isRunning && styles.inputDisabled]}
+                value={targetStr}
+                onChangeText={setTargetStr}
+                editable={!isRunning}
+                keyboardType="number-pad"
+                maxLength={5}
+              />
+            </View>
           </View>
           <View style={styles.statsRow}>
-            <Text style={styles.statLabel}>Price / piece</Text>
-            <Text style={styles.statValue}>P {pricePerPiece.toFixed(2)}</Text>
+            <Text style={styles.statLabel}>Price / piece:</Text>
+            <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end'}}>
+              <Text style={[styles.statValue, {marginRight: 8}]}>₱</Text>
+              <TextInput 
+                style={[styles.statValue, styles.input, isRunning && styles.inputDisabled]}
+                value={priceStr}
+                onChangeText={setPriceStr}
+                editable={!isRunning}
+                keyboardType="decimal-pad"
+                maxLength={5}
+              />
+            </View>
           </View>
           <View style={styles.statsRow}>
             <Text style={styles.statLabel}>Total:</Text>
-            <Text style={styles.statValue}>P {total.toFixed(2)}</Text>
+            <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end'}}>
+              <Text style={[styles.statValue, {paddingRight: 8}]}>₱ {total.toFixed(2)}</Text>
+            </View>
           </View>
           <View style={styles.divider} />
         </View>
 
-        <View style={[styles.buttonRow, { marginTop: 'auto' }]}>
-          <Pressable 
-            style={({pressed}) => [styles.button, styles.btnRed, { flex: 1, marginRight: 8 }, pressed && { opacity: 0.7 }]}
-            onPress={handleClear}
-          >
-            <Text style={styles.buttonText}>Clear</Text>
-          </Pressable>
-          <Pressable 
-            style={({pressed}) => [styles.button, styles.btnGreen, { flex: 1, marginLeft: 8 }, pressed && { opacity: 0.7 }]}
-            onPress={handleNewTransaction}
-          >
-            <Text style={styles.buttonText}>New Transaction</Text>
-          </Pressable>
-        </View>
+        <Pressable 
+          style={({pressed}) => [styles.button, styles.btnGreen, { marginTop: 'auto' }, pressed && !isRunning && { opacity: 0.7 }, isRunning && { opacity: 0.9 }]}
+          onPress={handleStart}
+          disabled={isRunning}
+        >
+          <Text style={styles.buttonText}>{isRunning ? 'Counting... Wait for result' : 'Start Counting'}</Text>
+        </Pressable>
       </View>
 
       {/* Right Panel */}
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>TRANSACTION HISTORY</Text>
         <ScrollView style={styles.historyList}>
-          {/* History Item 1 */}
-          <View style={styles.historyCardWrapper}>
-            <View style={styles.historyBadge}><Text style={styles.historyBadgeText}>1</Text></View>
-            <View style={styles.historyCard}>
-              <View style={styles.historyCardColumns}>
-                <View style={styles.historyCol}>
-                  <Text style={styles.historyColLabel}>COUNT</Text>
-                  <Text style={[styles.historyColVal, { color: '#2b7a15' }]}>100</Text>
-                </View>
-                <View style={styles.historyCol}>
-                  <Text style={styles.historyColLabel}>AMOUNT</Text>
-                  <Text style={[styles.historyColVal, { color: '#ded728' }]}>P 250.00</Text>
+          {history.map((item, index) => (
+            <Swipeable key={item.id} renderLeftActions={() => renderLeftActions(item.id)}>
+              <View style={styles.historyCardWrapper}>
+                <View style={styles.historyBadge}><Text style={styles.historyBadgeText}>{history.length - index}</Text></View>
+                <View style={styles.historyCard}>
+                  <View style={styles.historyCardColumns}>
+                    <View style={styles.historyCol}>
+                      <Text style={styles.historyColLabel}>COUNT</Text>
+                      <Text style={[styles.historyColVal, { color: '#2b7a15' }]}>{item.count}</Text>
+                    </View>
+                    <View style={styles.historyCol}>
+                      <Text style={styles.historyColLabel}>AMOUNT</Text>
+                      <Text style={[styles.historyColVal, { color: '#ded728' }]}>₱ {(item.amount || 0).toFixed(2)}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.historyDate}>{item.date}</Text>
                 </View>
               </View>
-              <Text style={styles.historyDate}>mm/dd/yyy • 00:00</Text>
-            </View>
-          </View>
+            </Swipeable>
+          ))}
           <Text style={styles.oldEntriesText}>Old entries in app</Text>
         </ScrollView>
       </View>
@@ -261,7 +432,7 @@ const SellerDashboard = () => {
 };
 
 export default function DashboardScreen() {
-  const { role, username } = useLocalSearchParams();
+  const { role, username, userId } = useLocalSearchParams();
   const isBuyer = role === 'buyer';
   const displayUser = username || 'User';
   const [timeStr, setTimeStr] = useState('');
@@ -307,7 +478,7 @@ export default function DashboardScreen() {
         </View>
 
         {/* Dashboard Content */}
-        {isBuyer ? <BuyerDashboard /> : <SellerDashboard />}
+        {isBuyer ? <BuyerDashboard userId={userId as string} /> : <SellerDashboard userId={userId as string} />}
 
       </View>
     </View>
