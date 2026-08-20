@@ -151,7 +151,7 @@ const BuyerDashboard = ({ userId }: { userId: string }) => {
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>VERIFYING COUNT</Text>
         <View style={styles.largeCard}>
-          <Text style={styles.largeCardNumber}>{String(remaining).padStart(4, '0')}</Text>
+          <Text adjustsFontSizeToFit numberOfLines={1} style={styles.largeCardNumber}>{String(remaining).padStart(4, '0')}</Text>
           <Text style={styles.largeCardLabel}>Remaining</Text>
         </View>
         
@@ -196,15 +196,15 @@ const BuyerDashboard = ({ userId }: { userId: string }) => {
                   <View style={styles.historyCardColumns}>
                     <View style={styles.historyCol}>
                       <Text style={styles.historyColLabel}>COUNT</Text>
-                      <Text style={[styles.historyColVal, { color: '#2b7a15' }]}>{item.count}</Text>
+                      <Text adjustsFontSizeToFit numberOfLines={1} style={[styles.historyColVal, { color: '#2b7a15' }]}>{item.count}</Text>
                     </View>
                     <View style={styles.historyCol}>
                       <Text style={styles.historyColLabel}>EXPECTED</Text>
-                      <Text style={[styles.historyColVal, { color: '#ded728' }]}>{item.expected}</Text>
+                      <Text adjustsFontSizeToFit numberOfLines={1} style={[styles.historyColVal, { color: '#ded728' }]}>{item.expected}</Text>
                     </View>
                     <View style={styles.historyCol}>
                       <Text style={styles.historyColLabel}>STATUS</Text>
-                      <Text style={[styles.historyColVal, { color: item.color }]}>{item.status}</Text>
+                      <Text adjustsFontSizeToFit numberOfLines={1} style={[styles.historyColVal, { color: item.color }]}>{item.status}</Text>
                     </View>
                   </View>
                   <Text style={styles.historyDate}>{item.date}</Text>
@@ -349,7 +349,7 @@ const SellerDashboard = ({ userId }: { userId: string }) => {
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>LIVE COUNT</Text>
         <View style={styles.largeCard}>
-          <Text style={styles.largeCardNumber}>{String(counted).padStart(5, '0')}</Text>
+          <Text adjustsFontSizeToFit numberOfLines={1} style={styles.largeCardNumber}>{String(counted).padStart(5, '0')}</Text>
           <Text style={styles.largeCardLabel}>Fingerlings Counted</Text>
         </View>
         
@@ -412,11 +412,11 @@ const SellerDashboard = ({ userId }: { userId: string }) => {
                   <View style={styles.historyCardColumns}>
                     <View style={styles.historyCol}>
                       <Text style={styles.historyColLabel}>COUNT</Text>
-                      <Text style={[styles.historyColVal, { color: '#2b7a15' }]}>{item.count}</Text>
+                      <Text adjustsFontSizeToFit numberOfLines={1} style={[styles.historyColVal, { color: '#2b7a15' }]}>{item.count}</Text>
                     </View>
                     <View style={styles.historyCol}>
                       <Text style={styles.historyColLabel}>AMOUNT</Text>
-                      <Text style={[styles.historyColVal, { color: '#ded728' }]}>₱ {(item.amount || 0).toFixed(2)}</Text>
+                      <Text adjustsFontSizeToFit numberOfLines={1} style={[styles.historyColVal, { color: '#ded728' }]}>₱ {(item.amount || 0).toFixed(2)}</Text>
                     </View>
                   </View>
                   <Text style={styles.historyDate}>{item.date}</Text>
@@ -665,42 +665,43 @@ const styles = StyleSheet.create({
   },
   historyList: {
     flex: 1,
-    paddingTop: 10,
   },
   historyCardWrapper: {
-    position: 'relative',
-    marginBottom: 16,
-    paddingLeft: 12,
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    marginBottom: 12,
+    overflow: 'hidden',
   },
   historyBadge: {
-    position: 'absolute',
-    left: 0,
-    top: -8,
     backgroundColor: '#BA2A23',
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1,
+    borderBottomRightRadius: 10,
+    alignSelf: 'flex-start',
   },
   historyBadgeText: {
     fontFamily: 'Roboto_700Bold',
     color: '#FFFFFF',
     fontWeight: 'bold',
-    fontSize: 14,
+    fontSize: 16,
   },
   historyCard: {
-    backgroundColor: '#E8E8E8',
-    borderRadius: 8,
-    padding: 8,
+    flex: 1,
+    backgroundColor: 'transparent',
+    padding: 16,
+    paddingLeft: 12,
   },
   historyCardColumns: {
     flexDirection: 'row',
     justifyContent: 'space-around',
   },
   historyCol: {
+    flexShrink: 1,
     alignItems: 'center',
+    paddingHorizontal: 4,
   },
   historyColLabel: {
     fontFamily: 'Roboto_700Bold',
@@ -710,7 +711,7 @@ const styles = StyleSheet.create({
   },
   historyColVal: {
     fontFamily: 'Roboto_700Bold',
-    fontSize: 32,
+    fontSize: 34,
     fontWeight: 'bold',
   },
   historyDate: {
