@@ -1,6 +1,6 @@
 import QRCode from 'react-native-qrcode-svg';
-import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions, Alert } from 'react-native';
+import { useEffect, useState, useRef } from 'react';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions, Alert, Animated, Easing } from 'react-native';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 
@@ -11,6 +11,67 @@ const generateCode = () => {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return result;
+};
+
+const ConnectionCircle = ({ label, isActive }: { label: string, isActive: boolean }) => {
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success'>('idle');
+  const rotateAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (isActive && status === 'idle') {
+      setStatus('loading');
+      
+      const loopAnim = Animated.loop(
+        Animated.timing(rotateAnim, {
+          toValue: 1,
+          duration: 1000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      );
+      loopAnim.start();
+
+      setTimeout(() => {
+        loopAnim.stop();
+        setStatus('success');
+        
+        Animated.sequence([
+          Animated.timing(scaleAnim, { toValue: 1.2, duration: 150, useNativeDriver: true }),
+          Animated.timing(scaleAnim, { toValue: 1, duration: 150, useNativeDriver: true })
+        ]).start();
+        
+      }, 1000); // 1 second loading animation
+    }
+  }, [isActive, status, rotateAnim, scaleAnim]);
+
+  const spin = rotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg']
+  });
+
+  return (
+    <Animated.View style={[
+      styles.circle,
+      status === 'success' ? styles.circleActive : styles.circleInactive,
+      status === 'loading' && { borderTopColor: '#10B981', borderRightColor: '#10B981' },
+      { transform: [{ rotate: status === 'loading' ? spin : '0deg' }, { scale: scaleAnim }] }
+    ]}>
+      {status === 'success' ? (
+         <Text style={[styles.circleText, styles.circleTextActive]}>✔</Text>
+      ) : (
+         <Animated.Text style={[
+           styles.circleText,
+           { transform: [{ rotate: status === 'loading' ? rotateAnim.interpolate({
+             inputRange: [0, 1],
+             outputRange: ['0deg', '-360deg']
+           }) : '0deg' }] }
+         ]}>
+           {label}
+         </Animated.Text>
+      )}
+    </Animated.View>
+  );
 };
 
 export default function PairingScreen() {
@@ -55,10 +116,10 @@ export default function PairingScreen() {
           if (currentBuyerId) setBuyerId(currentBuyerId);
           
           if (currentSellerId && currentBuyerId) {
-             // Add a delay before navigating so the user can see the 'B' circle turn green
+             // Add a delay before navigating so the user can see the checkmark animation finish
              setTimeout(() => {
                router.replace(`/dashboard?sellerId=${currentSellerId}&buyerId=${currentBuyerId}`);
-             }, 800);
+             }, 2000);
           }
         })
         .subscribe();
@@ -79,47 +140,14 @@ export default function PairingScreen() {
     }
   };
 
-  const simulateScan = async (role: 'buyer' | 'seller') => {
-    // Dynamically fetch a user with the corresponding role from the database
-    const { data: profiles, error: profileError } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('role', role)
-      .limit(1);
-
-    if (profileError || !profiles || profiles.length === 0) {
-      console.error("Could not find a profile for role:", role);
-      Alert.alert("Simulation Error", `No user found in the database with role: ${role}`);
-      return;
-    }
-
-    const userId = profiles[0].id;
-    
-    const updateData: any = {};
-    if (role === 'buyer') {
-      updateData.buyer_id = userId;
-      if (sellerId) updateData.status = 'paired';
-    } else {
-      updateData.seller_id = userId;
-      if (buyerId) updateData.status = 'paired';
-    }
-    
-    const { error } = await supabase
-      .from('pairing_sessions')
-      .update(updateData)
-      .eq('code', pairingCode);
-      
-    if (error) {
-      console.error("Simulation failed:", error);
-      Alert.alert("Error", "Could not simulate connection.");
-    }
-  };
-
   const handleScreenTap = () => {
-    if (!sellerId) {
-      simulateScan('seller');
-    } else if (!buyerId) {
-      simulateScan('buyer');
+    if (!sellerId && !buyerId) {
+      setSellerId('sim-seller');
+      setBuyerId('sim-buyer');
+      
+      setTimeout(() => {
+        router.replace('/dashboard');
+      }, 2000);
     }
   };
 
@@ -135,9 +163,7 @@ export default function PairingScreen() {
         </View>
 
         <View style={styles.qrRow}>
-          <View style={[styles.circle, sellerId ? styles.circleActive : styles.circleInactive]}>
-            <Text style={[styles.circleText, sellerId ? styles.circleTextActive : null]}>S</Text>
-          </View>
+          <ConnectionCircle label="S" isActive={!!sellerId} />
           
           <View style={styles.qrContainer}>
             <QRCode
@@ -148,9 +174,7 @@ export default function PairingScreen() {
             />
           </View>
 
-          <View style={[styles.circle, buyerId ? styles.circleActive : styles.circleInactive]}>
-            <Text style={[styles.circleText, buyerId ? styles.circleTextActive : null]}>B</Text>
-          </View>
+          <ConnectionCircle label="B" isActive={!!buyerId} />
         </View>
 
         <View style={styles.codeContainer}>
@@ -163,7 +187,6 @@ export default function PairingScreen() {
           </Pressable>
         )}
 
-        {/* Keeping explicit buttons just in case, but they are hidden for now or we can remove them. I'll remove them since screen tap does the job. */}
       </View>
     </Pressable>
   );
@@ -223,7 +246,7 @@ const styles = StyleSheet.create({
     borderColor: '#D9D9D9',
   },
   circleActive: {
-    borderColor: '#10B981', // green color from the image
+    borderColor: '#10B981', 
     backgroundColor: '#10B981',
   },
   circleText: {
@@ -261,27 +284,6 @@ const styles = StyleSheet.create({
     right: 24,
   },
   proceedButtonText: {
-    color: 'white',
-    fontFamily: 'Roboto_700Bold',
-    fontSize: 16,
-  },
-  simulateButtonsRow: {
-    flexDirection: 'row',
-    gap: 16,
-    position: 'absolute',
-    bottom: 24,
-    left: 24,
-  },
-  simulateBtn: {
-    backgroundColor: '#3b7597',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-  },
-  simulateBtnSeller: {
-    backgroundColor: '#0EA40E',
-  },
-  simulateBtnText: {
     color: 'white',
     fontFamily: 'Roboto_700Bold',
     fontSize: 16,
